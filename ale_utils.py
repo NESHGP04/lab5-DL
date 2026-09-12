@@ -7,6 +7,7 @@ Gymnasium (``CartPole-v1``, ``FrozenLake-v1``, etc.),
 """
 
 import os
+import time
 
 import numpy as np
 import gymnasium as gym
@@ -193,7 +194,8 @@ def ejecutar_episodio(env, funcion_agente, max_steps=10000, seed=None, verbose=F
     max_steps : int
         Número máximo de pasos a ejecutar.
     seed : int o None
-        Semilla para ``env.reset``, útil para reproducir un episodio exacto.
+        Semilla para ``env.reset`` y para ``env.action_space``, útil para
+        reproducir un episodio exacto (incluido el del agente aleatorio).
     verbose : bool
         Si es ``True`` imprime un resumen al terminar el episodio.
 
@@ -211,6 +213,11 @@ def ejecutar_episodio(env, funcion_agente, max_steps=10000, seed=None, verbose=F
           (en Atari incluye ``lives`` y ``frame_number``).
     """
     observation, info = env.reset(seed=seed)
+    if seed is not None:
+        # El action_space tiene su propio generador aleatorio, independiente
+        # del de env.reset: hay que sembrarlo también para que un episodio del
+        # agente aleatorio sea exactamente reproducible.
+        env.action_space.seed(seed)
 
     recompensas = []
     recompensa_total = 0.0
@@ -286,14 +293,18 @@ def generar_video_agente(nombre_entorno=ENTORNO_POR_DEFECTO,
     Retorna
     -------
     dict
-        - ``"videos"``: lista de rutas a los ``.mp4`` generados en esta llamada.
+        - ``"videos"``: lista de rutas a los ``.mp4`` escritos por esta llamada
+          (se puede repetir la corrida sobre una carpeta que ya tenga videos).
         - ``"episodios"``: lista de dicts con las métricas de cada episodio
           (``pasos``, ``recompensa_total``, ``motivo_fin``, ...).
         - ``"recompensa_promedio"`` y ``"pasos_promedio"``: resumen de la corrida.
     """
-    
+    # Marca de tiempo para distinguir los videos escritos por esta llamada de
+    # los que ya estuvieran en la carpeta. Se compara por fecha de modificación
+    # y no por nombre, porque al repetir la corrida RecordVideo sobrescribe los
+    # archivos con el mismo prefijo en vez de crear nombres nuevos.
     carpeta = os.path.abspath(video_folder)
-    previos = set(os.listdir(carpeta)) if os.path.isdir(carpeta) else set()
+    inicio = time.time() - 1  # margen por la granularidad del sistema de archivos
 
     env = crear_entorno(
         nombre_entorno,
@@ -320,8 +331,11 @@ def generar_video_agente(nombre_entorno=ENTORNO_POR_DEFECTO,
     finally:
         env.close()
 
-    nuevos = sorted(f for f in os.listdir(carpeta)
-                    if f not in previos and f.endswith(".mp4"))
+    nuevos = sorted(
+        f for f in os.listdir(carpeta)
+        if f.startswith(name_prefix) and f.endswith(".mp4")
+        and os.path.getmtime(os.path.join(carpeta, f)) >= inicio
+    )
     videos = [os.path.join(carpeta, f) for f in nuevos]
 
     recompensas = [ep["recompensa_total"] for ep in episodios]
