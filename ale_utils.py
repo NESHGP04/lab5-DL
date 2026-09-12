@@ -172,3 +172,76 @@ def agente_regla_simple(observation, env):
     if abs(dx) <= 1:
         return accion_fire
     return accion_der if dx > 0 else accion_izq
+
+
+def ejecutar_episodio(env, funcion_agente, max_steps=10000, seed=None, verbose=False):
+    """Ejecuta un episodio completo en ``env`` usando ``funcion_agente``.
+
+    El episodio corre hasta que ``terminated`` o ``truncated`` sea verdadero,
+    o hasta alcanzar ``max_steps`` pasos.
+
+    Parámetros
+    ----------
+    env : gymnasium.Env
+        Entorno ya creado (puede venir envuelto en ``RecordVideo``).
+    funcion_agente : callable
+        Función ``(observation, env) -> action``, por ejemplo
+        :func:`agente_aleatorio`, :func:`agente_regla_simple` o, en el
+        Proyecto 2, una política aprendida.
+    max_steps : int
+        Número máximo de pasos a ejecutar.
+    seed : int o None
+        Semilla para ``env.reset``, útil para reproducir un episodio exacto.
+    verbose : bool
+        Si es ``True`` imprime un resumen al terminar el episodio.
+
+    Retorna
+    -------
+    dict
+        Métricas del episodio:
+
+        - ``"pasos"``: número de pasos ejecutados.
+        - ``"recompensa_total"``: return acumulado (suma de recompensas).
+        - ``"terminated"`` / ``"truncated"``: cómo terminó el episodio.
+        - ``"motivo_fin"``: ``"terminated"``, ``"truncated"`` o ``"max_steps"``.
+        - ``"recompensas"``: lista con la recompensa de cada paso.
+        - ``"info"``: último diccionario ``info`` devuelto por el entorno
+          (en Atari incluye ``lives`` y ``frame_number``).
+    """
+    observation, info = env.reset(seed=seed)
+
+    recompensas = []
+    recompensa_total = 0.0
+    pasos = 0
+    terminated = False
+    truncated = False
+
+    while not (terminated or truncated) and pasos < max_steps:
+        accion = funcion_agente(observation, env)
+        observation, reward, terminated, truncated, info = env.step(accion)
+        recompensa_total += float(reward)
+        recompensas.append(float(reward))
+        pasos += 1
+
+    if terminated:
+        motivo_fin = "terminated"
+    elif truncated:
+        motivo_fin = "truncated"
+    else:
+        motivo_fin = "max_steps"
+
+    resultado = {
+        "pasos": pasos,
+        "recompensa_total": recompensa_total,
+        "terminated": terminated,
+        "truncated": truncated,
+        "motivo_fin": motivo_fin,
+        "recompensas": recompensas,
+        "info": info,
+    }
+
+    if verbose:
+        print(f"Episodio finalizado ({motivo_fin}): "
+              f"pasos={pasos}, recompensa_total={recompensa_total:.1f}")
+
+    return resultado
