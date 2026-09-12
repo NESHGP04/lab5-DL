@@ -67,3 +67,7 @@ def crear_entorno(nombre_entorno=ENTORNO_POR_DEFECTO,
         )
 
     return env
+
+
+def agente_aleatorio(observation, env):
+    return env.action_space.sample()
