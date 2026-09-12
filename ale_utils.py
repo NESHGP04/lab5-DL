@@ -6,6 +6,7 @@ Estas funciones son agnósticas al entorno: funcionan tanto con
 Gymnasium (``CartPole-v1``, ``FrozenLake-v1``, etc.), 
 """
 
+import numpy as np
 import gymnasium as gym
 import ale_py
 
@@ -71,3 +72,103 @@ def crear_entorno(nombre_entorno=ENTORNO_POR_DEFECTO,
 
 def agente_aleatorio(observation, env):
     return env.action_space.sample()
+
+
+# --- Constantes de color del frame RGB de ALE/SpaceInvaders-v5 -------------
+COLOR_JUGADOR = (50, 132, 50)     # cañón láser del jugador (verde)
+COLOR_ALIENS = (134, 134, 29)     # fila de invasores (amarillo)
+FILAS_JUGADOR = (185, 195)        # banda de filas donde vive el cañón
+X_MIN_CANON, X_MAX_CANON = 20, 140  # rango horizontal recorrible por el cañón
+MARGEN_ALIEN = 2                    # px de holgura al considerar una columna ocupada
+
+
+def _columnas_de_color(observation, color, filas=None):
+    """Retorna las columnas (x) donde aparece un color dado en el frame.
+
+    Parámetros
+    ----------
+    observation : np.ndarray
+        Frame RGB de forma ``(210, 160, 3)``.
+    color : tuple
+        Color RGB a buscar.
+    filas : tuple o None
+        Rango ``(y_min, y_max)`` de filas donde buscar. ``None`` = todo el frame.
+
+    Retorna
+    -------
+    np.ndarray
+        Índices de columna donde el color está presente (puede venir vacío).
+    """
+    frame = observation if filas is None else observation[filas[0]:filas[1]]
+    mascara = np.all(frame == np.array(color, dtype=np.uint8), axis=-1)
+    return np.where(mascara.any(axis=0))[0]
+
+
+def agente_regla_simple(observation, env):
+    """Agente heurístico (no aprendido) para ALE/SpaceInvaders-v5.
+
+    Regla: **colocarse en un hueco entre las columnas de invasores y disparar
+    sin parar**. En cada paso el agente localiza por color su cañón y todos los
+    invasores vivos, calcula las columnas libres (aquellas que no tienen ningún
+    alien encima, con un margen de seguridad) y se desplaza hacia la más
+    cercana mientras dispara:
+
+    - Hueco a la derecha  -> ``RIGHTFIRE``
+    - Hueco a la izquierda -> ``LEFTFIRE``
+    - Ya está en un hueco  -> ``FIRE``
+
+    La intuición es doble: los invasores solo lanzan bombas desde su propia
+    columna, así que estar en un hueco reduce el riesgo de ser alcanzado, y
+    como la formación avanza en horizontal los aliens terminan entrando solos
+    en la línea de fuego del cañón.
+
+    La detección se hace por color sobre el frame RGB. Si la observación no es una imagen RGB de Atari, o si
+    no se detecta el cañón o los aliens, el agente simplemente dispara.
+
+    Parámetros
+    ----------
+    observation : np.ndarray
+        Observación actual del entorno (frame RGB de 210x160x3).
+    env : gymnasium.Env
+        Entorno, usado para resolver los índices de las acciones por nombre.
+
+    Retorna
+    -------
+    int
+        Índice de la acción elegida, válido en ``env.action_space``.
+    """
+    try:
+        nombres = env.unwrapped.get_action_meanings()
+    except AttributeError:
+        return agente_aleatorio(observation, env)
+
+    accion_fire = nombres.index("FIRE") if "FIRE" in nombres else 0
+    accion_der = nombres.index("RIGHTFIRE") if "RIGHTFIRE" in nombres else accion_fire
+    accion_izq = nombres.index("LEFTFIRE") if "LEFTFIRE" in nombres else accion_fire
+
+    obs = np.asarray(observation)
+    if obs.ndim != 3 or obs.shape[-1] != 3:
+        return accion_fire
+
+    x_jugador = _columnas_de_color(obs, COLOR_JUGADOR, FILAS_JUGADOR)
+    x_aliens = _columnas_de_color(obs, COLOR_ALIENS)
+    if len(x_jugador) == 0 or len(x_aliens) == 0:
+        return accion_fire
+
+    centro_jugador = x_jugador.mean()
+
+    # Columnas "peligrosas": las que tienen un alien encima (+/- margen).
+    ocupadas = np.concatenate(
+        [x_aliens + k for k in range(-MARGEN_ALIEN, MARGEN_ALIEN + 1)]
+    )
+    libres = np.setdiff1d(np.arange(X_MIN_CANON, X_MAX_CANON), ocupadas)
+    if len(libres) == 0:
+        return accion_fire
+
+    # Hueco más cercano al cañón.
+    objetivo = libres[np.argmin(np.abs(libres - centro_jugador))]
+    dx = objetivo - centro_jugador
+
+    if abs(dx) <= 1:
+        return accion_fire
+    return accion_der if dx > 0 else accion_izq
