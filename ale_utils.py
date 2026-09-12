@@ -6,6 +6,8 @@ Estas funciones son agnósticas al entorno: funcionan tanto con
 Gymnasium (``CartPole-v1``, ``FrozenLake-v1``, etc.), 
 """
 
+import os
+
 import numpy as np
 import gymnasium as gym
 import ale_py
@@ -245,3 +247,97 @@ def ejecutar_episodio(env, funcion_agente, max_steps=10000, seed=None, verbose=F
               f"pasos={pasos}, recompensa_total={recompensa_total:.1f}")
 
     return resultado
+
+
+def generar_video_agente(nombre_entorno=ENTORNO_POR_DEFECTO,
+                         funcion_agente=agente_aleatorio,
+                         video_folder="videos",
+                         name_prefix="agente",
+                         n_episodios=1,
+                         max_steps=10000,
+                         seed=None,
+                         verbose=True,
+                         **kwargs):
+    """Ejecuta episodios completos grabando video y retorna rutas y métricas.
+
+    Parámetros
+    ----------
+    nombre_entorno : str
+        Id del entorno (por defecto ``"ALE/SpaceInvaders-v5"``).
+    funcion_agente : callable
+        Función ``(observation, env) -> action``.
+    video_folder : str
+        Carpeta destino de los archivos ``.mp4``.
+    name_prefix : str
+        Prefijo de los videos generados.
+    n_episodios : int
+        Cantidad de episodios completos a ejecutar y grabar.
+    max_steps : int
+        Corte de seguridad de pasos por episodio.
+    seed : int o None
+        Semilla base. El episodio ``i`` usa ``seed + i``, de modo que los
+        videos son reproducibles.
+    verbose : bool
+        Imprime el resumen de cada episodio mientras corre.
+    **kwargs
+        Argumentos adicionales para ``gymnasium.make`` (``frameskip``,
+        ``repeat_action_probability``, ``full_action_space``, ...).
+
+    Retorna
+    -------
+    dict
+        - ``"videos"``: lista de rutas a los ``.mp4`` generados en esta llamada.
+        - ``"episodios"``: lista de dicts con las métricas de cada episodio
+          (``pasos``, ``recompensa_total``, ``motivo_fin``, ...).
+        - ``"recompensa_promedio"`` y ``"pasos_promedio"``: resumen de la corrida.
+    """
+    
+    carpeta = os.path.abspath(video_folder)
+    previos = set(os.listdir(carpeta)) if os.path.isdir(carpeta) else set()
+
+    env = crear_entorno(
+        nombre_entorno,
+        video_folder=video_folder,
+        name_prefix=name_prefix,
+        **kwargs,
+    )
+
+    episodios = []
+    try:
+        for i in range(n_episodios):
+            semilla = None if seed is None else seed + i
+            resultado = ejecutar_episodio(
+                env, funcion_agente, max_steps=max_steps, seed=semilla
+            )
+            resultado["episodio"] = i
+            resultado["seed"] = semilla
+            episodios.append(resultado)
+
+            if verbose:
+                print(f"Episodio {i + 1}/{n_episodios} ({resultado['motivo_fin']}): "
+                      f"pasos={resultado['pasos']}, "
+                      f"recompensa_total={resultado['recompensa_total']:.1f}")
+    finally:
+        env.close()
+
+    nuevos = sorted(f for f in os.listdir(carpeta)
+                    if f not in previos and f.endswith(".mp4"))
+    videos = [os.path.join(carpeta, f) for f in nuevos]
+
+    recompensas = [ep["recompensa_total"] for ep in episodios]
+    pasos = [ep["pasos"] for ep in episodios]
+    resumen = {
+        "videos": videos,
+        "episodios": episodios,
+        "recompensa_promedio": sum(recompensas) / len(recompensas) if recompensas else 0.0,
+        "pasos_promedio": sum(pasos) / len(pasos) if pasos else 0.0,
+    }
+
+    if verbose:
+        print(f"\nVideos generados en {carpeta}:")
+        for ruta in videos:
+            print("  -", os.path.basename(ruta))
+        print(f"Recompensa promedio: {resumen['recompensa_promedio']:.1f} | "
+              f"Pasos promedio: {resumen['pasos_promedio']:.1f}")
+
+    return resumen
